@@ -24,6 +24,8 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     dx: "",
     borough: "",
     steps: 5,
+    excl: new Set<string>(),
+    exclMode: "days" as "days" | "spells",
     anchor: "", // "" = admission, else first stay on this ward
 
   };
@@ -93,7 +95,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   <div class="card">
     <div class="cardhead">
       <div><h2>Patient flow, ward by ward</h2>
-      <div class="note">Each column is the next ward stay in the spell; moves between two wards of the same type are merged. Band width = number of spells. <b>Click a ward or a band to follow only those patients forward</b>; use the trail to go back.</div></div>
+      <div class="note">Each column is the next ward stay in the spell; moves between two wards of the same type are merged. Band width = number of spells. <b>Hover</b> a ward or band to trace where those patients go; <b>click</b> to follow only them forward, and use the trail to go back.</div></div>
       <div class="legend flowlegend">
         <span class="lgroup">Bands</span>
         <span><i style="background:var(--hl)"></i><span id="lgHl"></span></span>
@@ -122,6 +124,21 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       <div class="legend"><span><i style="background:var(--hl)"></i>Includes the highlighted move</span><span><i style="background:var(--base)"></i>Does not</span><span><b class="ring"></b>Still in hospital (stay so far)</span></div>
     </div>
     <div id="los"></div>
+  </div>
+
+  <div class="card">
+    <div class="cardhead">
+      <div><h2>Length of stay by discharge ward</h2>
+      <div class="note" id="disNote"></div></div>
+      <div class="controls">
+        <div class="ctl">Excluded wards
+          <select id="exclMode">${opt("days", "Remove their days from the stay", true)}${opt("spells", "Leave out spells that used them", false)}</select></div>
+      </div>
+    </div>
+    <div class="chips" id="exclChips"></div>
+    <div id="disChart"></div>
+    <div class="legend" id="disLegend"></div>
+    <div id="disDrill"></div>
   </div>
 
   <div class="card" id="watchCard">
@@ -192,6 +209,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     fromSel.value = st.from = f;
     toSel.value = st.to = t;
     if (!WARDS.includes(st.anchor)) st.anchor = "";
+    for (const w of [...st.excl]) if (!WARDS.includes(w)) st.excl.delete(w);
     $<HTMLSelectElement>("#anchorSel").innerHTML = opt("", "Admission (1st ward)", !st.anchor) +
       WARDS.map((w) => opt(w, `First stay on ${w}`, w === st.anchor)).join("");
   }
@@ -218,6 +236,18 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   bind("#dxSel", (el) => (st.dx = el.value));
   bind("#borSel", (el) => (st.borough = el.value));
   bind("#stepsSel", (el) => (st.steps = +el.value));
+  bind("#exclMode", (el) => (st.exclMode = el.value as "days" | "spells"));
+  $("#exclChips").addEventListener("change", (e) => {
+    const cb = e.target as HTMLInputElement;
+    if (cb.checked) st.excl.add(cb.value);
+    else st.excl.delete(cb.value);
+    dischargeChart(lastSp);
+  });
+  $("#exclChips").addEventListener("click", (e) => {
+    if (!(e.target as Element).closest("[data-clear]")) return;
+    st.excl.clear();
+    render();
+  });
   bind("#anchorSel", (el) => {
     st.anchor = el.value;
     drill.length = 0;
@@ -297,22 +327,23 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   /* ----- sankey (hand laid out) ----- */
   interface SNode { c: number; name: string; key: string; sp: S[]; in: SLink[]; out: SLink[]; x: number; y: number; h: number }
   interface SLink { s: string; t: string; sp: S[]; hl: boolean; w: number; y0: number; y1: number }
-  /** Drill-down stack: each level keeps the spells followed and where each one now starts. */
-  interface Level { label: string; items: Map<S, number> }
+  /** Drill-down stack: each level keeps the spells followed and the column that was clicked.
+   *  Columns keep their real positions: earlier wards stay visible (faded) to the left. */
+  interface Level { label: string; sp: Set<S>; base: number }
   const drill: Level[] = [];
 
   function sankey(spells: S[], from: string, to: string): void {
     const host = $("#sankey");
-    host.innerHTML = "";
     const avail = Math.max(340, host.clientWidth), narrow = avail < 640;
 
-    // Where each spell's flow starts: admission, the first stay on the anchor ward, or the drilled position.
-    const inView = new Set(spells);
-    let off: Map<S, number>;
-    if (drill.length) off = new Map([...drill[drill.length - 1].items].filter(([s]) => inView.has(s)));
-    else if (st.anchor) off = new Map(spells.filter((s) => s.path.includes(st.anchor)).map((s) => [s, s.path.indexOf(st.anchor)]));
-    else off = new Map(spells.map((s) => [s, 0]));
-    const list = [...off.keys()];
+    // Where each spell's flow starts: admission, or the first stay on the anchor ward.
+    // Drilling only narrows the spells; it never moves the starting column.
+    let pool = st.anchor ? spells.filter((s) => s.path.includes(st.anchor)) : spells;
+    const level = drill[drill.length - 1];
+    if (level) pool = pool.filter((s) => level.sp.has(s));
+    const base = level?.base ?? 0; // selected column; columns before it are history
+    const off = new Map(pool.map((s) => [s, st.anchor ? s.path.indexOf(st.anchor) : 0]));
+    const list = pool;
     const o = (s: S) => off.get(s)!;
     const len = (s: S) => s.path.length - o(s);
 
@@ -330,7 +361,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       return;
     }
 
-    const MAXSTEPS = st.steps;
+    const MAXSTEPS = base + st.steps;
     const maxLen = Math.min(MAXSTEPS, d3.max(list, len) ?? 1);
     const C = maxLen + 1;
     const END = (s: S) => (s.open ? "Still in hospital" : "Discharged");
@@ -388,71 +419,135 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       n.in.forEach((l) => { l.y1 = y + l.w / 2; y += l.w; });
     });
 
+    const ord = (c: number) => c + 1 + (c === 0 ? "st" : c === 1 ? "nd" : c === 2 ? "rd" : "th");
+    const colName = (c: number) =>
+      st.anchor ? (c === 0 ? "Starting ward" : c === 1 ? "Next ward" : `${ord(c)} ward from start`) : `${ord(c)} ward`;
+    const drilled = drill.length > 0;
+    const isHist = (c: number) => drilled && c < base;
     const follow = (label: string, sp: S[], c: number) => {
-      drill.push({ label, items: new Map(sp.map((s) => [s, o(s) + c])) });
+      drill.push({ label: `${colName(c)}: ${label}`, sp: new Set(sp), base: c });
       hideTip();
       render();
     };
     const total = list.length;
-    const svg = d3.select(host).append("svg").attr("width", W > avail ? W : "100%").attr("viewBox", `0 0 ${W} ${H}`)
-      .attr("role", "img").attr("aria-label", "Flow of spells between ward types");
-    const ord = (c: number) => c + 1 + (c === 0 ? "st" : c === 1 ? "nd" : c === 2 ? "rd" : "th");
-    const rooted = drill.length > 0 || !!st.anchor;
-    svg.selectAll("text.col").data(d3.range(C)).join("text").attr("class", "col")
-      .attr("x", (c) => c * xStep).attr("y", 10).attr("font-size", 11).attr("fill", "var(--text-muted)")
-      .text((c) => rooted ? (c === 0 ? "Starting ward" : c === 1 ? "Next ward" : `${ord(c)} ward from start`) : narrow ? ord(c) : c === 0 ? "1st ward" : `${ord(c)} ward`);
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const DUR = reduce ? 0 : 650;
+
+    // One persistent svg: elements are matched by key between renders so they glide to new places.
+    let svg = d3.select(host).select<SVGSVGElement>("svg.flow");
+    if (svg.empty()) {
+      host.innerHTML = "";
+      svg = d3.select(host).append("svg").attr("class", "flow").attr("role", "img").attr("aria-label", "Flow of spells between ward types");
+      for (const c of ["cols", "links", "trace", "nodes", "labels"]) svg.append("g").attr("class", c);
+    }
+    svg.attr("width", W > avail ? W : "100%").attr("viewBox", `0 0 ${W} ${H}`).classed("tracing", false);
+    svg.select("g.trace").selectAll("*").remove();
+    const t = svg.transition().duration(DUR).ease(d3.easeCubicInOut) as unknown as d3.Transition<d3.BaseType, unknown, null, undefined>;
+
+    svg.select("g.cols").selectAll<SVGTextElement, number>("text").data(d3.range(C), (c) => c)
+      .join((e) => e.append("text").attr("y", 10).attr("font-size", 11).attr("fill", "var(--text-muted)").attr("x", (c) => c * xStep).attr("opacity", 0))
+      .text((c) => (narrow && !st.anchor ? ord(c) : colName(c)) + (drilled && c === base ? " · selected" : ""))
+      .attr("font-weight", (c) => (drilled && c === base ? 700 : 400))
+      .attr("fill", (c) => (drilled && c === base ? "var(--nhs-blue)" : "var(--text-muted)"))
+      .transition(t).attr("x", (c) => c * xStep).attr("opacity", (c) => (isHist(c) ? 0.6 : 1));
+
     const L = [...links.values()].sort((a, b) => +a.hl - +b.hl);
     // Bands are filled ribbons between their top and bottom edges, so wide bands stay
     // inside their two columns. The highlighted move keeps a visible minimum width.
     const bw = (l: SLink) => (l.hl ? Math.max(4, l.w) : Math.max(1, l.w));
-    const ribbon = (l: SLink) => {
+    const ribbonPath = (l: SLink, h: number, c0: number, c1: number) => {
       const a = nodes.get(l.s)!, b = nodes.get(l.t)!;
-      const x0 = a.x + nodeW, x1 = b.x, xm = (x0 + x1) / 2, h = bw(l) / 2;
-      const t0 = l.y0 - h, b0 = l.y0 + h, t1 = l.y1 - h, b1 = l.y1 + h;
-      return `M${x0},${t0}C${xm},${t0} ${xm},${t1} ${x1},${t1}L${x1},${b1}C${xm},${b1} ${xm},${b0} ${x0},${b0}Z`;
+      const x0 = a.x + nodeW, x1 = b.x, xm = (x0 + x1) / 2;
+      return `M${x0},${c0 - h}C${xm},${c0 - h} ${xm},${c1 - h} ${x1},${c1 - h}L${x1},${c1 + h}C${xm},${c1 + h} ${xm},${c0 + h} ${x0},${c0 + h}Z`;
     };
-    svg.append("g").selectAll("path").data(L).join("path")
-      .attr("d", ribbon)
+    const ribbon = (l: SLink) => ribbonPath(l, bw(l) / 2, l.y0, l.y1);
+    const linkKey = (l: SLink) => l.s + ">" + l.t;
+    const nodeFill = (n: SNode) => n.name === "Still in hospital" ? "var(--base)" : isTerm(n.name) ? "var(--node-term)" : n.name === from ? "var(--from-node)" : n.name === to ? "var(--to-node)" : "var(--node)";
+    const nodeY = (n: SNode) => n.y - (n.h < 6 ? 2 : 0);
+    const nodeH = (n: SNode) => (n.h < 6 ? n.h + 4 : n.h);
+    const N = [...nodes.values()];
+
+    /* ----- hover tracing: show where these exact patients go, fade everything else ----- */
+    const traceSel = svg.select("g.trace");
+    const trace = (set: Set<S> | null) => {
+      traceSel.selectAll("*").remove();
+      svg.classed("tracing", !!set);
+      nodeSel.classed("dim", (n) => !!set && !n.sp.some((s) => set.has(s)));
+      labelSel.classed("dim", (n) => !!set && !n.sp.some((s) => set.has(s)));
+      if (!set) return;
+      for (const l of L) {
+        let c = 0;
+        for (const s of l.sp) if (set.has(s)) c++;
+        if (!c) continue;
+        // The traced share sits at the top of its band, in proportion to its size.
+        const w = Math.max(1.5, (c / l.sp.length) * bw(l)), top0 = l.y0 - bw(l) / 2, top1 = l.y1 - bw(l) / 2;
+        traceSel.append("path").attr("d", ribbonPath(l, w / 2, top0 + w / 2, top1 + w / 2))
+          .attr("fill", l.hl ? "var(--hl)" : "var(--trace)").attr("fill-opacity", 0.9).attr("pointer-events", "none");
+      }
+    };
+
+    const linkSel = svg.select("g.links").selectAll<SVGPathElement, SLink>("path").data(L, linkKey)
+      .join(
+        (e) => e.append("path").attr("d", ribbon).attr("fill-opacity", 0),
+        (u) => u,
+        (x) => x.attr("pointer-events", "none").transition(t).attr("fill-opacity", 0).remove(),
+      )
       .attr("fill", (l) => (l.hl ? "var(--hl)" : "var(--link)"))
-      .attr("fill-opacity", (l) => (l.hl ? 0.9 : 0.35))
       .style("cursor", (l) => (isTerm(nodes.get(l.t)!.name) ? "default" : "pointer"))
       .on("click", (_ev, l) => {
         const a = nodes.get(l.s)!, b = nodes.get(l.t)!;
         if (!isTerm(b.name)) follow(`${a.name} → ${b.name}`, l.sp, b.c);
       })
-      .on("mouseenter", function (ev: MouseEvent, l) {
-        d3.select(this).attr("fill-opacity", l.hl ? 1 : 0.7);
+      .on("mouseenter", (ev: MouseEvent, l) => {
+        trace(new Set(l.sp));
         const a = nodes.get(l.s)!, b = nodes.get(l.t)!, los = losOf(l.sp), nO = l.sp.filter((s) => s.open).length;
         showTip(ev, `<b>${esc(a.name)} → ${esc(b.name)}</b><br>${fmt(l.sp.length)} spells (${pct(l.sp.length, total)})${nO && !soFar() ? `, ${fmt(nO)} still in hospital` : ""}` +
           (los.length ? `<br>${soFar() ? "Median stay so far" : "Median total stay"}: <b>${fd(q(los, 0.5))} days</b><br><span class="m">IQR ${fd(q(los, 0.25))}–${fd(q(los, 0.75))} days</span>` : `<br><span class="m">No discharged spells yet</span>`) +
           (isTerm(b.name) ? "" : `<br><span class="m">Click to follow these patients</span>`));
       })
       .on("mousemove", moveTip)
-      .on("mouseleave", function (_ev, l) {
-        d3.select(this).attr("fill-opacity", l.hl ? 0.9 : 0.35);
-        hideTip();
-      });
-    const N = [...nodes.values()];
-    const g = svg.append("g").selectAll("g").data(N).join("g");
-    g.append("rect").attr("x", (n) => n.x).attr("y", (n) => n.y - (n.h < 6 ? 2 : 0)).attr("width", nodeW).attr("height", (n) => Math.max(n.h, n.h < 6 ? n.h + 4 : n.h)).attr("rx", 3)
-      .attr("fill", (n) => n.name === "Still in hospital" ? "var(--base)" : isTerm(n.name) ? "var(--node-term)" : n.name === from ? "var(--from-node)" : n.name === to ? "var(--to-node)" : "var(--node)")
-      .style("cursor", (n) => (isTerm(n.name) || (n.c === 0 && rooted) ? "default" : "pointer"))
+      .on("mouseleave", () => { trace(null); hideTip(); });
+    linkSel.order();
+    // Bands leading up to the selected column are history: shown, but faded.
+    const linkOp = (l: SLink) => (isHist(nodes.get(l.s)!.c) ? (l.hl ? 0.4 : 0.14) : l.hl ? 0.9 : 0.35);
+    linkSel.transition(t).attr("d", ribbon).attr("fill-opacity", linkOp);
+
+    const nodeSel = svg.select("g.nodes").selectAll<SVGRectElement, SNode>("rect").data(N, (n) => n.key)
+      .join(
+        (e) => e.append("rect").attr("x", (n) => n.x).attr("y", nodeY).attr("width", nodeW).attr("height", nodeH).attr("rx", 3).attr("opacity", 0),
+        (u) => u,
+        (x) => x.attr("pointer-events", "none").transition(t).attr("opacity", 0).remove(),
+      )
+      .style("cursor", (n) => (isTerm(n.name) ? "default" : "pointer"))
       .on("click", (_ev, n) => {
-        if (isTerm(n.name) || (n.c === 0 && rooted)) return;
-        follow(n.c === 0 ? `1st ward ${n.name}` : n.name, n.sp, n.c);
+        if (isTerm(n.name) || n.sp.length === list.length && n.c === base) return;
+        follow(n.name, n.sp, n.c);
       })
       .on("mouseenter", (ev: MouseEvent, n) => {
+        trace(new Set(n.sp));
         const los = losOf(n.sp);
         const days = sorted(n.sp.map((s) => s.seq[o(s) + n.c]?.days).filter((x): x is number => x != null));
-        const clickable = !isTerm(n.name) && !(n.c === 0 && rooted);
+        const clickable = !isTerm(n.name) && !(n.sp.length === list.length && n.c === base);
         showTip(ev, `<b>${esc(n.name)}</b><br>${fmt(n.sp.length)} spells (${pct(n.sp.length, total)})${!isTerm(n.name) && days.length ? `<br>Median days on this ward: <b>${fd(q(days, 0.5))}</b>` : ""}${los.length ? `<br>${soFar() ? "Median stay so far" : "Median total stay"}: <b>${fd(q(los, 0.5))} days</b>` : ""}${clickable ? `<br><span class="m">Click to follow these patients forward</span>` : ""}`);
       })
-      .on("mousemove", moveTip).on("mouseleave", hideTip);
-    g.filter((n) => (narrow ? n.h >= 16 : n.h >= 9 || n.sp.length / total > 0.02)).append("text")
-      .attr("x", (n) => n.x + nodeW + 5).attr("y", (n) => n.y + n.h / 2).attr("dy", "0.35em")
+      .on("mousemove", moveTip)
+      .on("mouseleave", () => { trace(null); hideTip(); });
+    nodeSel.attr("stroke", (n) => (drilled && n.c === base ? "var(--text-primary)" : "none")).attr("stroke-width", 2);
+    nodeSel.transition(t).attr("x", (n) => n.x).attr("y", nodeY).attr("height", nodeH).attr("fill", nodeFill).attr("opacity", (n) => (isHist(n.c) ? 0.5 : 1));
+
+    const labelled = N.filter((n) => (narrow ? n.h >= 16 : n.h >= 9 || n.sp.length / total > 0.02));
+    const labelSel = svg.select("g.labels").selectAll<SVGTextElement, SNode>("text").data(labelled, (n) => n.key)
+      .join(
+        (e) => e.append("text").attr("x", (n) => n.x + nodeW + 5).attr("y", (n) => n.y + n.h / 2).attr("dy", "0.35em").attr("opacity", 0)
+          .attr("fill", "var(--text-secondary)").attr("pointer-events", "none"),
+        (u) => u,
+        (x) => x.attr("pointer-events", "none").transition(t).attr("opacity", 0).remove(),
+      )
       .attr("font-size", narrow ? 10.5 : 12).attr("font-weight", (n) => (n.name === from || n.name === to ? 700 : 400))
-      .attr("fill", "var(--text-secondary)").attr("pointer-events", "none")
       .text((n) => `${n.name} ${fmt(n.sp.length)}`);
+    labelSel.transition(t).attr("x", (n) => n.x + nodeW + 5).attr("y", (n) => n.y + n.h / 2).attr("opacity", (n) => (isHist(n.c) ? 0.55 : 1));
+    // Keep the selected column in view when the diagram is wider than the card.
+    if (W > avail) host.scrollTo({ left: drilled ? Math.max(0, base * xStep - xStep) : 0, behavior: reduce ? "auto" : "smooth" });
   }
 
   /* ----- LOS strip / box chart ----- */
@@ -540,7 +635,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   const ps = { sort: "los", dir: -1 }; // spell list inside an opened pathway
   const PAGE = 25, SPELL_CAP = 200;
   let lastView: S[] = [];
-  const NHS_PALETTE = ["#768692", "#41b6e6", "#78be20", "#ae2573", "#ffb81c", "#8a1538", "#006747", "#425563", "#aeb7bd", "#7c2855"];
+  const NHS_PALETTE = ["#768692", "#41b6e6", "#78be20", "#ae2573", "#ffb81c", "#8a1538", "#006747", "#425563", "#aeb7bd", "#7c2855", "#b07c00", "#00708a"];
   const wardColor = (w: string, from: string, to: string) =>
     w === from ? "var(--from-node)" : w === to ? "var(--to-node)" : NHS_PALETTE[Math.max(0, WARDS.indexOf(w)) % NHS_PALETTE.length];
 
@@ -674,6 +769,161 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
+  /* ----- LOS by discharge ward ----- */
+  let lastSp: S[] = [];
+  /** Drill-through from the discharge-ward chart: the group (and optional ward type) clicked. */
+  const dd = { ward: "", via: "", sort: "los", dir: -1, page: 0 };
+  const DD_PAGE = 50;
+  let ddRows: S[] = [];
+  const keepWard = (w: string) => !(st.exclMode === "days" && st.excl.has(w));
+  const adjLos = (s: S) => d3.sum(s.seq, (x) => (keepWard(x.ward) ? x.days : 0));
+
+  function drillThrough(disc: S[]): void {
+    const box = $("#disDrill");
+    if (!dd.ward) { box.innerHTML = ""; ddRows = []; return; }
+    let sp = disc.filter((s) => s.path[s.path.length - 1] === dd.ward);
+    if (dd.via) sp = sp.filter((s) => s.path.includes(dd.via));
+    const adj = st.exclMode === "days" && st.excl.size > 0;
+    const val: Record<string, (s: S) => number | string> = {
+      id: (s) => s.id, adm: (s) => s.adm || "", dis: (s) => disTime(s) || 0, los: (s) => adjLos(s), total: (s) => s.los,
+      via: (s) => d3.sum(s.seq, (x) => (x.ward === dd.via ? x.days : 0)), moves: (s) => s.path.length,
+    };
+    const f = val[dd.sort] ?? val.los;
+    ddRows = sp.sort((a, b) => {
+      const x = f(a), y = f(b);
+      return (typeof x === "string" ? x.localeCompare(y as string) : (x as number) - (y as number)) * dd.dir;
+    });
+    const pages = Math.max(1, Math.ceil(ddRows.length / DD_PAGE));
+    dd.page = Math.min(dd.page, pages - 1);
+    const slice = ddRows.slice(dd.page * DD_PAGE, (dd.page + 1) * DD_PAGE);
+    const avg = d3.mean(ddRows, adjLos) ?? 0;
+    const h = (label: string, key: string, cls = "") => sortHead(label, key, dd, "data-dsort", cls);
+    const title = `Discharged from ${dd.ward}${dd.via ? ` · spent time on ${dd.via}` : ""}`;
+    box.innerHTML = `<div class="drill">
+      <div class="cardhead"><div><h3>${esc(title)}</h3>
+        <div class="note">${fmt(ddRows.length)} spells · average stay ${fd(avg)} days${adj ? ` (excluding ${esc([...st.excl].join(", "))})` : ""}. Click a heading to sort.</div></div>
+        <div class="drill-actions"><button type="button" data-dcsv="1">Download CSV</button><button type="button" data-dclose="1">✕ Close</button></div></div>
+      <div style="overflow-x:auto"><table class="drilltable"><thead><tr>${h("Spell", "id")}${h("Admitted", "adm")}${h("Discharged (approx.)", "dis")}${h(adj ? "Stay excl. (d)" : "Stay (d)", "los", "n")}${adj ? h("Total stay (d)", "total", "n") : ""}${dd.via ? h(`Days on ${dd.via}`, "via", "n") : ""}${h("Pathway (days on each ward)", "moves")}</tr></thead><tbody>` +
+      slice.map((s) => {
+        const a = admDate(s), d = disTime(s);
+        const via = d3.sum(s.seq, (x) => (x.ward === dd.via ? x.days : 0));
+        return `<tr><td>${esc(s.id)}</td><td>${a ? monthFmt(a) : "–"}</td><td>${isFinite(d) ? "≈ " + monthFmt(new Date(d)) : "–"}</td><td class="n">${fd(adjLos(s))}</td>${adj ? `<td class="n">${fd(s.los)}</td>` : ""}${dd.via ? `<td class="n">${fd(via)}</td>` : ""}<td class="path"><div class="pathwrap">${pathDaysHtml(s, st.from, st.to)}</div></td></tr>`;
+      }).join("") + `</tbody></table></div>` +
+      (pages > 1 ? `<div class="pager"><button type="button" data-dpage="${dd.page - 1}"${dd.page === 0 ? " disabled" : ""}>‹ Previous</button><span class="note">Page ${dd.page + 1} of ${fmt(pages)}</span><button type="button" data-dpage="${dd.page + 1}"${dd.page >= pages - 1 ? " disabled" : ""}>Next ›</button></div>` : "") +
+      `</div>`;
+  }
+
+  function dischargeChart(view: S[]): void {
+    lastSp = view;
+    const host = $("#disChart");
+    host.innerHTML = "";
+    const { from, to } = st;
+    const ex = st.excl;
+    // Chips: one per ward type, ticked = excluded.
+    $("#exclChips").innerHTML = '<span class="lgroup">Exclude</span>' +
+      WARDS.map((w) => `<label class="chip${ex.has(w) ? " on" : ""}"><input type="checkbox" value="${esc(w)}"${ex.has(w) ? " checked" : ""}><b class="sq" style="background:${wardColor(w, from, to)}"></b>${esc(w)}</label>`).join("") +
+      (ex.size ? '<button type="button" data-clear="1">Clear</button>' : "");
+
+    let disc = view.filter((s) => !s.open);
+    if (st.exclMode === "spells" && ex.size) disc = disc.filter((s) => !s.path.some((w) => ex.has(w)));
+    const keep = keepWard;
+    const rows = d3.groups(disc, (s) => s.path[s.path.length - 1]).map(([ward, sp]) => {
+      const byWard = new Map<string, number>(), users = new Map<string, number>();
+      for (const s of sp) {
+        for (const x of s.seq) if (keep(x.ward)) byWard.set(x.ward, (byWard.get(x.ward) ?? 0) + x.days);
+        for (const w of new Set(s.path)) if (keep(w)) users.set(w, (users.get(w) ?? 0) + 1);
+      }
+      // avg is per spell in the bar (so parts add up to the bar); perUser is per spell that used the ward.
+      const parts = WARDS.filter((w) => byWard.has(w)).map((w) => ({
+        ward: w, avg: byWard.get(w)! / sp.length, total: byWard.get(w)!, users: users.get(w) ?? 0,
+      }));
+      return { ward, n: sp.length, parts, avg: d3.sum(parts, (p) => p.avg) };
+    }).filter((r) => r.n).sort((a, b) => b.avg - a.avg);
+
+    const exTxt = ex.size ? (st.exclMode === "days" ? ` Days on ${[...ex].join(", ")} are left out of each stay.` : ` Spells that used ${[...ex].join(", ")} are left out.`) : "";
+    $("#disNote").textContent = `Discharged spells grouped by the last ward before discharge (${fmt(disc.length)} spells). Bar = average length of stay, split by the ward types where those days were spent (each part is averaged over every spell in the bar, so the parts add up to the total). Click a ward name or bar to list its spells, or a coloured segment for spells that used that ward. Faded rows have fewer than 10 spells.` + exTxt;
+    if (dd.ward && !rows.some((r) => r.ward === dd.ward)) dd.ward = dd.via = "";
+    drillThrough(disc);
+    if (!rows.length) {
+      host.innerHTML = '<p class="note">No discharged spells match these settings.</p>';
+      $("#disLegend").innerHTML = "";
+      return;
+    }
+    const W = Math.max(340, host.clientWidth), narrow = W < 640;
+    const labelW = narrow ? 120 : 200, rowH = 30, top = 4, axisH = 26;
+    const H = top + rows.length * rowH + axisH;
+    const x = d3.scaleLinear().domain([0, d3.max(rows, (r) => r.avg) || 1]).nice().range([labelW, W - 70]);
+    const svg = d3.select(host).append("svg").attr("width", "100%").attr("viewBox", `0 0 ${W} ${H}`)
+      .attr("role", "img").attr("aria-label", "Average length of stay by discharge ward");
+    const ticks = x.ticks(narrow ? 4 : 8);
+    svg.append("g").selectAll("line").data(ticks).join("line").attr("x1", x).attr("x2", x).attr("y1", top).attr("y2", H - axisH).attr("stroke", "var(--grid)");
+    svg.append("g").selectAll("text").data(ticks).join("text").attr("x", x).attr("y", H - axisH + 16).attr("text-anchor", "middle").attr("font-size", 11).attr("fill", "var(--text-muted)").text((t) => fmt(t));
+    svg.append("text").attr("x", W - 70).attr("y", H - 1).attr("text-anchor", "end").attr("font-size", 11).attr("fill", "var(--text-muted)").text("Average days");
+    rows.forEach((r, i) => {
+      const y = top + i * rowH, bh = 18, by = y + (rowH - bh) / 2;
+      const sel = dd.ward === r.ward;
+      const g = svg.append("g").attr("opacity", r.n < 10 ? 0.45 : 1).style("cursor", "pointer")
+        .on("click", (ev: MouseEvent) => {
+          const via = (ev.target as Element).getAttribute("data-via") ?? "";
+          if (dd.ward === r.ward && dd.via === via) dd.ward = dd.via = "";
+          else Object.assign(dd, { ward: r.ward, via, page: 0 });
+          hideTip();
+          dischargeChart(lastSp);
+          if (dd.ward) $("#disDrill").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      if (sel) g.append("rect").attr("x", 0).attr("y", y + 1).attr("width", W - 4).attr("height", rowH - 2).attr("rx", 4).attr("fill", "var(--band)");
+      g.append("rect").attr("x", 0).attr("y", y).attr("width", labelW).attr("height", rowH).attr("fill", "transparent");
+      g.append("text").attr("x", labelW - 8).attr("y", by + bh / 2).attr("dy", "0.35em").attr("text-anchor", "end").attr("font-size", 12)
+        .attr("font-weight", r.ward === from || r.ward === to ? 700 : 400).attr("fill", "var(--text-primary)").text(r.ward);
+      let acc = 0;
+      for (const p of r.parts) {
+        const x0 = x(acc), w = x(acc + p.avg) - x0;
+        acc += p.avg;
+        g.append("rect").attr("x", x0).attr("y", by).attr("width", Math.max(0, w - (w > 2 ? 1 : 0))).attr("height", bh).attr("fill", wardColor(p.ward, from, to))
+          .attr("data-via", p.ward).attr("stroke", sel && dd.via === p.ward ? "var(--text-primary)" : "none").attr("stroke-width", 2)
+          .on("mouseenter", (ev: MouseEvent) => showTip(ev, `<b>Discharged from ${esc(r.ward)} · ${esc(p.ward)}</b><br>` +
+            `${fmt(p.users)} of ${fmt(r.n)} spells spent time on ${esc(p.ward)}: <b>${fd(p.total / Math.max(1, p.users))} days</b> each on average<br>` +
+            `<span class="m">Across all ${fmt(r.n)} spells that is ${fd(p.avg)} days per spell (${fmt(Math.round(p.total))} days ÷ ${fmt(r.n)}), ${r.avg ? Math.round((p.avg / r.avg) * 100) : 0}% of the ${fd(r.avg)}-day average stay</span><br><span class="m">Click to list spells that spent time on ${esc(p.ward)}; click the ward name for all</span>`))
+          .on("mousemove", moveTip).on("mouseleave", hideTip);
+      }
+      g.append("text").attr("x", x(r.avg) + 6).attr("y", by + bh / 2).attr("dy", "0.35em").attr("font-size", 12).attr("fill", "var(--text-primary)")
+        .html(`<tspan font-weight="700">${fd(r.avg)} d</tspan><tspan fill="var(--text-muted)"> · n=${fmt(r.n)}</tspan>`);
+    });
+    const used = WARDS.filter((w) => rows.some((r) => r.parts.some((p) => p.ward === w)));
+    $("#disLegend").innerHTML = used.map((w) => `<span><b class="sq" style="background:${wardColor(w, from, to)}"></b>${esc(w)}</span>`).join("");
+  }
+
+  $("#disDrill").addEventListener("click", (e) => {
+    const t = e.target as Element;
+    const sh = t.closest<HTMLElement>("[data-dsort]");
+    if (sh) {
+      const k = sh.dataset.dsort!;
+      dd.dir = dd.sort === k ? -dd.dir : k === "id" || k === "adm" || k === "dis" ? 1 : -1;
+      dd.sort = k;
+      dd.page = 0;
+      dischargeChart(lastSp);
+      return;
+    }
+    const pg = t.closest<HTMLElement>("[data-dpage]");
+    if (pg) { dd.page = +pg.dataset.dpage!; dischargeChart(lastSp); return; }
+    if (t.closest("[data-dclose]")) { dd.ward = dd.via = ""; dischargeChart(lastSp); return; }
+    if (t.closest("[data-dcsv]")) {
+      const cell = (v: unknown) => { const x = String(v ?? ""); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+      const lines = [["spell", "admitted_month", "discharged_month_approx", "stay_days", "total_stay_days", "pathway"].join(",")].concat(
+        ddRows.map((s) => {
+          const a = admDate(s), d = disTime(s);
+          return [s.id, a ? d3.utcFormat("%Y-%m")(a) : "", isFinite(d) ? d3.utcFormat("%Y-%m")(new Date(d)) : "", Math.round(adjLos(s)), Math.round(s.los),
+            s.seq.map((x) => `${x.ward} (${Math.round(x.days)}d)`).join(" > ")].map(cell).join(",");
+        }));
+      const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+      const a = Object.assign(document.createElement("a"), { href: url, download: `discharged-from-${dd.ward}${dd.via ? "-via-" + dd.via : ""}.csv`.replace(/[^\w.-]+/g, "-") });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  });
+
   /* ----- current inpatient watchlist ----- */
   function watch(spells: S[], from: string, to: string): void {
     const card = $("#watchCard");
@@ -708,13 +958,14 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     if (st.status === "disc") sp = sp.filter((s) => !s.open);
     if (st.status === "open") sp = sp.filter((s) => s.open);
     if (!sp.length) {
-      for (const id of ["#tiles", "#sankey", "#los", "#ptable", "#wtable"]) $(id).innerHTML = "";
+      for (const id of ["#tiles", "#sankey", "#los", "#ptable", "#wtable", "#disChart"]) $(id).innerHTML = "";
       $("#tiles").innerHTML = '<p class="note">No spells match these settings.</p>';
       return;
     }
     tiles(sp, from, to);
     sankey(sp, from, to);
     losChart(sp, from, to);
+    dischargeChart(sp);
     watch(sp, from, to);
     table(sp, from, to);
   }

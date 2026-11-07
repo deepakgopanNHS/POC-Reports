@@ -10,8 +10,9 @@ Live app: https://easy-plume-dbb4a8caf5-ukwest.webapp.fabricapps.net
 
 - **Controls**: highlight a move (default Adult rehab → Adult acute); group wards by local ward type, MHSDS bed type or broad group; case mix filters (admission year, age band, legal status, diagnosis group, borough).
 - **Headline tiles**: share of rehab spells moved to acute, and median total stay with and without the move.
-- **Patient flow**: a Sankey of ward stays in order. Click a ward or band to follow only those patients forward, with a trail to go back. The flow can start at admission or at the first stay on any ward.
+- **Patient flow**: a Sankey of ward stays in order. Hover a ward or band to trace where those patients go; click to follow only them, keeping earlier wards visible (faded) and the real ward numbers. Changes animate. The flow can start at admission or at the first stay on any ward.
 - **Total length of stay by pathway type**: every spell as a dot, with medians and interquartile ranges.
+- **Length of stay by discharge ward**: average stay split by ward type, with options to remove chosen wards' days or leave out spells that used them. Click a bar or segment to drill through to the spells.
 - **Current inpatients** who have had the highlighted move, with days on each ward.
 - **All pathways**: every distinct ward sequence, searchable and sortable, with average stay. Open a pathway to see its spells, ward by ward, with an estimated discharge month. Downloadable as CSV.
 
