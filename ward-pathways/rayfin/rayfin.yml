@@ -1,0 +1,41 @@
+id: ward-pathways
+name: ward-pathways
+version: 1.0.0
+services:
+  auth:
+    enabled: true
+    customClaims:
+      app_version: 1.0.0
+    scopes:
+      - read:data
+    password:
+      enabled: false
+    allowedRedirectUris:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+      - https://easy-plume-dbb4a8caf5-ukwest.webapp.fabricapps.net
+    fabric:
+      enabled: true
+  staticHosting:
+    enabled: true
+    folder: dist
+    buildCommand: npm run build
+    indexDocument: index.html
+    assetAccess: protected
+  data:
+    enabled: false
+  storage:
+    enabled: false
+  functions:
+    enabled: false
+connectors:
+  - name: wardmodel
+    type: fabric-semanticmodel
+    config:
+      workspaceId: 37471f67-3749-414e-884b-01adfc920709
+      itemId: 6ab94d34-8034-434e-a11b-bacc8e91dc48
+    auth:
+      type: delegated
+    version: "1"
+    operations:
+      - name: executeQuery
