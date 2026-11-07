@@ -1,0 +1,27 @@
+{
+  "name": "ward-pathways",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@microsoft/rayfin-auth-provider-fabric": "1.36.2",
+    "@microsoft/rayfin-client": "1.36.2",
+    "@microsoft/rayfin-connector-fabric-semanticmodel": "1.36.2",
+    "@microsoft/rayfin-connectors": "1.36.2",
+    "d3": "7.9.0"
+  },
+  "devDependencies": {
+    "@microsoft/rayfin-cli": "1.36.2",
+    "@types/d3": "7.4.3",
+    "typescript": "^5.6.3",
+    "vite": "^7.0.0"
+  },
+  "overrides": {
+    "zod": "4.6.6"
+  }
+}
