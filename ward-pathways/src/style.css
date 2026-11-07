@@ -223,3 +223,30 @@ th.sortable:hover { color: var(--nhs-blue); }
 th.sortable.sorted { color: var(--nhs-blue); }
 th.sortable .sdir { margin-left: 4px; font-size: 10px; opacity: .55; }
 th.sortable.sorted .sdir { opacity: 1; }
+
+/* ---------- LOS by discharge ward ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 10px; }
+.chips .lgroup { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; color: var(--text-muted); margin-right: 4px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface-1); cursor: pointer; user-select: none;
+}
+.chip input { position: absolute; opacity: 0; pointer-events: none; }
+.chip:hover { border-color: var(--text-muted); }
+.chip.on { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); text-decoration: line-through; }
+.chip:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+#disLegend { margin-top: 8px; }
+.chip .sq { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.drill { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--nhs-blue); border-radius: 6px; background: var(--surface-1); }
+.drill h3 { font-size: 14px; margin: 0 0 2px; }
+.drill-actions { display: flex; gap: 8px; }
+.drilltable td { vertical-align: top; }
+
+/* ---------- Flow hover tracing ---------- */
+.viz-root { --trace: #003087; }
+:root[data-theme="dark"] .viz-root { --trace: #9cc8f5; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .viz-root { --trace: #9cc8f5; } }
+svg.flow g.links path, svg.flow g.nodes rect, svg.flow g.labels text { transition: opacity .15s, fill-opacity .15s; }
+svg.flow.tracing g.links path { fill-opacity: .1; }
+svg.flow g.nodes rect.dim { opacity: .25; }
+svg.flow g.labels text.dim { opacity: .3; }
