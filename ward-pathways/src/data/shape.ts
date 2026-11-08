@@ -17,8 +17,8 @@ export interface Spell {
   age: string;
   legal: string;
   dx: string;
-  borough: string;
-  readmit: boolean;
+  admAt: number; // admission date-time, ms (NaN if missing)
+  disAt: number; // discharge date-time, ms (NaN while in hospital)
 }
 
 export interface WardData {
@@ -35,13 +35,18 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const when = (v: unknown): number => {
+  const s = str(v);
+  return s ? Date.parse(s) : NaN;
+};
+
 /** Shape raw query rows into spells. Exported so it can be tested without the connector. */
 export function shapeWardData(stays: DataRow[], spells: DataRow[], extract: unknown): WardData {
   return { spells: buildSpells(stays, spells), extractDate: str(extract) };
 }
 
 function buildSpells(stayRows: DataRow[], spellRows: DataRow[]): Spell[] {
-  const bySpell = new Map<string, { q: number; bo: string; stay: Stay }[]>();
+  const bySpell = new Map<string, { q: number; stay: Stay }[]>();
   for (const r of stayRows) {
     const id = str(r.s);
     if (!id) continue;
@@ -49,7 +54,6 @@ function buildSpells(stayRows: DataRow[], spellRows: DataRow[]): Spell[] {
     // A handful of stays have small negative durations; treat them as zero.
     list.push({
       q: num(r.q),
-      bo: str(r.bo),
       stay: { ward: str(r.w) || "Unknown", bed: str(r.b) || "Unknown", days: Math.max(0, num(r.d)) },
     });
     bySpell.set(id, list);
@@ -69,8 +73,8 @@ function buildSpells(stayRows: DataRow[], spellRows: DataRow[]): Spell[] {
       age: str(r.age) || "Unknown",
       legal: legalGroup(str(r.leg)),
       dx: dxGroup(str(r.dx)),
-      borough: list[0].bo || "Unknown",
-      readmit: num(r.rd) === 1,
+      admAt: when(r.ad),
+      disAt: when(r.dd),
     });
   }
   return out;

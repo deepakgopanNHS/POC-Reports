@@ -12,12 +12,11 @@ SELECTCOLUMNS(
   "q", WardMovement[ward_seq],
   "w", WardMovement[ward_type],
   "b", WardMovement[bed_type],
-  "d", WardMovement[days],
-  "bo", WardMovement[borough]
+  "d", WardMovement[days]
 )`;
 
-// One row per spell. These attributes are constant within a spell
-// (borough is not, so it is taken from the first stay instead).
+// One row per spell. These attributes are constant within a spell.
+// admission_date and discharge_date are ISO text; discharge is "null" while in hospital.
 const SPELLS_DAX = `
 EVALUATE
 SUMMARIZECOLUMNS(
@@ -28,7 +27,8 @@ SUMMARIZECOLUMNS(
   "age", MIN(WardMovement[age_band]),
   "leg", MIN(WardMovement[legal_status]),
   "dx", MIN(WardMovement[primary_dx_icd3]),
-  "rd", MAX(WardMovement[readmitted_30d])
+  "ad", MIN(WardMovement[admission_date]),
+  "dd", MIN(WardMovement[discharge_date])
 )`;
 
 const EXTRACT_DAX = `EVALUATE ROW("x", FORMAT(MAX(WardMovement[extract_date]), "d mmm yyyy"))`;
