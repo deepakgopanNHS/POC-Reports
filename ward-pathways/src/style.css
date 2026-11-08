@@ -249,4 +249,18 @@ th.sortable.sorted .sdir { opacity: 1; }
 svg.flow g.links path, svg.flow g.nodes rect, svg.flow g.labels text { transition: opacity .15s, fill-opacity .15s; }
 svg.flow.tracing g.links path { fill-opacity: .1; }
 svg.flow g.nodes rect.dim { opacity: .25; }
-svg.flow g.labels text.dim { opacity: .3; }
+
+/* Dark mode toggle switch */
+label.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--mast-ink); cursor: pointer; padding-bottom: 10px; user-select: none; }
+label.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+label.switch .track { position: relative; width: 38px; height: 22px; border-radius: 11px; background: rgba(255, 255, 255, 0.28); border: 1px solid rgba(255, 255, 255, 0.6); transition: background 0.2s; flex: none; }
+label.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.2s; }
+label.switch input:checked + .track { background: #ffb81c; border-color: #ffb81c; }
+label.switch input:checked + .track::after { transform: translateX(16px); }
+label.switch input:focus-visible + .track { outline: 3px solid #ffeb3b; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { label.switch .track, label.switch .track::after { transition: none; } }
+
+/* Flow labels: a halo in the card colour keeps text readable over any band. */
+svg.flow g.labels text { paint-order: stroke; stroke: var(--surface-1); stroke-width: 4px; stroke-linejoin: round; stroke-opacity: .92; }
+svg.flow.tracing g.labels text:not(.dim) { fill: var(--text-primary); font-weight: 700; }
+svg.flow g.labels text.dim { opacity: .45; }

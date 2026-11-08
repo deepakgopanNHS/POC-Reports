@@ -8,15 +8,15 @@ Live app: https://easy-plume-dbb4a8caf5-ukwest.webapp.fabricapps.net
 
 ## What it shows
 
-- **Controls**: highlight a move (default Adult rehab → Adult acute); group wards by local ward type, MHSDS bed type or broad group; case mix filters (admission year, age band, legal status, diagnosis group, borough).
-- **Headline tiles**: share of rehab spells moved to acute, and median total stay with and without the move.
+- **Controls**: highlight a move (default Adult rehab → Adult acute); group wards by local ward type, MHSDS bed type or broad group.
+- **Headline tiles**: spells in view, share of rehab spells moved to acute, and current inpatients with that move.
 - **Patient flow**: a Sankey of ward stays in order. Hover a ward or band to trace where those patients go; click to follow only them, keeping earlier wards visible (faded) and the real ward numbers. Changes animate. The flow can start at admission or at the first stay on any ward.
 - **Total length of stay by pathway type**: every spell as a dot, with medians and interquartile ranges.
 - **Length of stay by discharge ward**: average stay split by ward type, with options to remove chosen wards' days or leave out spells that used them. Click a bar or segment to drill through to the spells.
 - **Current inpatients** who have had the highlighted move, with days on each ward.
-- **All pathways**: every distinct ward sequence, searchable and sortable, with average stay. Open a pathway to see its spells, ward by ward, with an estimated discharge month. Downloadable as CSV.
+- **All pathways**: every distinct ward sequence, searchable and sortable, with average stay. Open a pathway to see its spells, ward by ward, with admission and discharge dates. Downloadable as CSV.
 
-The model holds admission month only and no discharge date, so the discharge month shown is admission month + length of stay and may be out by up to a month.
+Admission and discharge dates come from the model's `admission_date` and `discharge_date` columns (discharge is blank while a patient is in hospital).
 
 ## Run and deploy
 

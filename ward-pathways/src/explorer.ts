@@ -2,7 +2,7 @@ import * as d3 from "d3";
 import type { WardData } from "./data/shape";
 
 import {
-  DOT_CAP, broad, fmt, fd, pct, q, sorted, esc, seeded, moves, returnedTo, daysBeforeMove, daysAfterMove,
+  DOT_CAP, broad, fmt, fd, pct, q, sorted, esc, seeded, moves, returnedTo, daysAfterMove,
   type GroupBy, type Status, type S,
 } from "./analysis";
 /* ---------- explorer ---------- */
@@ -18,11 +18,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     to: "",
     status: "all" as Status,
     onlyFrom: true,
-    year: 0,
-    age: "",
-    legal: "",
-    dx: "",
-    borough: "",
     steps: 5,
     excl: new Set<string>(),
     exclMode: "days" as "days" | "spells",
@@ -31,9 +26,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   };
 
   const nOpenAll = ALL.filter((s) => s.open).length;
-  const years = [...new Set(ALL.map((s) => s.year).filter((y) => y > 1900))].sort(d3.ascending);
-  const levels = (k: "age" | "legal" | "dx" | "borough") =>
-    [...d3.rollup(ALL, (v) => v.length, (s) => s[k])].sort((a, b) => b[1] - a[1]).map((x) => x[0]);
   const mismatch = ALL.reduce(
     (n, s) => n + s.stays.filter((x) => /rehab/i.test(x.ward) !== /rehab/i.test(x.bed)).length,
     0,
@@ -42,8 +34,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
 
   const opt = (v: string | number, label: string, sel: boolean) =>
     `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(label)}</option>`;
-  const filterSel = (id: string, label: string, vals: string[]) =>
-    `<div class="ctl">${label}<select id="${id}">${opt("", "All", true)}${vals.map((v) => opt(v, v, false)).join("")}</select></div>`;
 
   root.innerHTML = `
 <div class="wrap">
@@ -62,7 +52,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
         <div class="sub">How spells move between ward types from admission to discharge, and what happens to total length of stay when a patient is moved from rehabilitation back to an acute ward.</div>
       </div>
       <div class="mast-actions">
-        <label class="chk"><input type="checkbox" id="themeT"> Dark mode</label>
+        <label class="switch"><input type="checkbox" role="switch" id="themeT"><span class="track" aria-hidden="true"></span> Dark mode</label>
         <button id="reloadBtn" type="button" class="ghost">Refresh</button>
       </div>
       <div class="filters">
@@ -76,19 +66,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       </div>
     </div>
   </header>
-
-  <details class="more" id="caseMix">
-    <summary>Case mix filters <span class="note" id="cmCount"></span></summary>
-    <div class="controls inner">
-      <div class="ctl">Admitted from
-        <select id="yearSel">${opt(0, "All years", true)}${years.map((y) => opt(y, String(y), false)).join("")}</select></div>
-      ${filterSel("ageSel", "Age band", levels("age").sort())}
-      ${filterSel("legalSel", "Legal status", levels("legal"))}
-      ${filterSel("dxSel", "Primary diagnosis", levels("dx"))}
-      ${filterSel("borSel", "Borough (first ward)", levels("borough"))}
-      <button type="button" id="clearCm">Clear</button>
-    </div>
-  </details>
 
   <div class="tiles" id="tiles"></div>
 
@@ -163,8 +140,8 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
 
   <div class="card">
     <h2>Reading this fairly</h2>
-    <p class="caveat">These figures show an association, not proof that the move itself causes the longer stay. Patients moved back to acute care are often more unwell, so part of the gap may come from case mix. Use the case mix filters to compare like with like, for example a single diagnosis group or legal status. Watch the rehab days “lost” before a step-back and whether patients return to rehab, where the programme often restarts.</p>
-    <p class="caveat"><b>Data notes.</b> Ward type and bed type disagree on rehab for ${fmt(mismatch)} stays (${fmt(rehabStays)} stays are on wards labelled rehab), so compare both groupings. Medians and quartiles use discharged spells unless “Current inpatients only” is chosen. Length of stay is the sum of ward days in the spell. A few admissions date from before 2007; use “Admitted from” to exclude them.</p>
+    <p class="caveat">These figures show an association, not proof that the move itself causes the longer stay. Patients moved back to acute care are often more unwell, so part of the gap may come from case mix. Watch the rehab days “lost” before a step-back and whether patients return to rehab, where the programme often restarts.</p>
+    <p class="caveat"><b>Data notes.</b> Ward type and bed type disagree on rehab for ${fmt(mismatch)} stays (${fmt(rehabStays)} stays are on wards labelled rehab), so compare both groupings. Medians and quartiles use discharged spells unless “Current inpatients only” is chosen. Length of stay is the sum of ward days in the spell. A few admissions date from before 2007.</p>
   </div>
 </div>
 <div class="tip" id="tip"></div>`;
@@ -230,11 +207,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   bind("#toSel", (el) => (st.to = el.value));
   bind("#statusSel", (el) => (st.status = el.value as Status));
   bind("#onlyFrom", (el) => (st.onlyFrom = el.checked));
-  bind("#yearSel", (el) => (st.year = +el.value));
-  bind("#ageSel", (el) => (st.age = el.value));
-  bind("#legalSel", (el) => (st.legal = el.value));
-  bind("#dxSel", (el) => (st.dx = el.value));
-  bind("#borSel", (el) => (st.borough = el.value));
   bind("#stepsSel", (el) => (st.steps = +el.value));
   bind("#exclMode", (el) => (st.exclMode = el.value as "days" | "spells"));
   $("#exclChips").addEventListener("change", (e) => {
@@ -256,12 +228,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     const b = (e.target as Element).closest<HTMLElement>("[data-level]");
     if (!b) return;
     drill.length = Math.max(0, +b.dataset.level!);
-    render();
-  });
-  $("#clearCm").addEventListener("click", () => {
-    Object.assign(st, { year: 0, age: "", legal: "", dx: "", borough: "" });
-    for (const id of ["#yearSel", "#ageSel", "#legalSel", "#dxSel", "#borSel"])
-      $<HTMLSelectElement>(id).selectedIndex = 0;
     render();
   });
 
@@ -289,36 +255,16 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
   /* ----- tiles ----- */
   function tiles(view: S[], from: string, to: string): void {
     const fromSp = view.filter((s) => s.path.includes(from));
-    const base = statSet(fromSp);
-    const med = (arr: S[]) => {
-      const v = sorted(arr.map((s) => s.los));
-      return v.length ? q(v, 0.5) : NaN;
-    };
-    const noArr = base.filter((s) => moves(s, from, to) === 0);
-    const retArr = base.filter((s) => returnedTo(s, from, to));
-    const notRetArr = base.filter((s) => moves(s, from, to) > 0 && !returnedTo(s, from, to));
-    const mN = med(noArr), mR = med(retArr), mD = med(notRetArr);
     const withMove = fromSp.filter((s) => moves(s, from, to) > 0);
-    const before = sorted(withMove.map((s) => daysBeforeMove(s, from, to)!).filter((x) => x != null));
     const nOpen = view.filter((s) => s.open).length;
-    const lbl = soFar() ? "Median stay so far" : "Median total stay";
-    const basis = soFar() ? "stay to date" : nOpen ? "discharged spells" : "spells";
-    const vs = (m: number) =>
-      isFinite(m) && isFinite(mN) && mN > 0
-        ? `<b>${m - mN >= 0 ? "+" : "−"}${fd(Math.abs(m - mN))} days</b> (${m - mN >= 0 ? "+" : "−"}${Math.abs(Math.round(((m - mN) / mN) * 100))}%) vs no move`
-        : "";
     const openMove = view.filter((s) => s.open && moves(s, from, to) > 0);
-    const om = sorted(openMove.map((s) => s.los));
+    const om = openMove.map((s) => s.los);
     const T = [
       { k: "Spells in view", v: fmt(view.length), d: `${fmt(view.length - nOpen)} discharged · ${fmt(nOpen)} still in hospital` },
       { k: `${esc(from)} spells moved to ${esc(to)}`, v: pct(withMove.length, fromSp.length), d: `${fmt(withMove.length)} of ${fmt(fromSp.length)} spells that included ${esc(from)}` },
-      { k: `${lbl}: ${esc(from)}, no move`, v: isFinite(mN) ? fd(mN) + " d" : "–", d: `${fmt(noArr.length)} ${basis}` },
-      { k: `<span class="sw"></span>${lbl}: moved, then returned to ${esc(from)}`, v: isFinite(mR) ? fd(mR) + " d" : "–", d: `${fmt(retArr.length)} ${basis}${vs(mR) ? " · " + vs(mR) : ""}`, hero: true },
-      { k: `${lbl}: moved, didn’t return`, v: isFinite(mD) ? fd(mD) + " d" : "–", d: `${fmt(notRetArr.length)} ${basis}${vs(mD) ? " · " + vs(mD) : ""}`, hero: true },
-      { k: `Days on ${esc(from)} before the move`, v: before.length ? fd(q(before, 0.5)) + " d" : "–", d: before.length ? `median · IQR ${fd(q(before, 0.25))}–${fd(q(before, 0.75))} days of ${esc(from)} care before stepping back` : "no moves in view" },
     ];
     if (nOpen)
-      T.push({ k: `Current inpatients moved ${esc(from)} → ${esc(to)}`, v: fmt(openMove.length), d: om.length ? `median ${fd(q(om, 0.5))} days in hospital so far` : "none at present" });
+      T.push({ k: `Current inpatients moved ${esc(from)} → ${esc(to)}`, v: fmt(openMove.length), d: om.length ? `average ${fd(d3.mean(om)!)} days in hospital so far` : "none at present" });
     $("#tiles").innerHTML = T.map(
       (t) => `<div class="tile${"hero" in t && t.hero ? " hero" : ""}"><div class="k">${t.k}</div><div class="v">${t.v}</div><div class="d">${t.d}</div></div>`,
     ).join("");
@@ -581,8 +527,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       const los = losOf(gp.sp);
       const nO = gp.sp.filter((s) => s.open).length, has = los.length > 0;
       const md = has ? q(los, 0.5) : NaN, q1 = has ? q(los, 0.25) : NaN, q3 = has ? q(los, 0.75) : NaN;
-      const rd = statSet(gp.sp);
-      const readm = soFar() || !rd.length ? "" : ` · readmitted ≤30d ${pct(rd.filter((s) => s.readmit).length, rd.length)}`;
       const nTxt = soFar() ? `n=${fmt(gp.sp.length)} in hospital` : `n=${fmt(gp.sp.length - nO)}${nO ? ` + ${fmt(nO)} in hospital` : ""}`;
       const mTxt = has ? ` · median ${fd(md)} d` : " · no discharges yet";
       const g = svg.append("g");
@@ -592,7 +536,6 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       } else {
         g.append("text").attr("x", 0).attr("y", cy - 4).attr("font-size", 12.5).attr("font-weight", 600).attr("fill", "var(--text-primary)").text(gp.name);
         g.append("text").attr("x", 0).attr("y", cy + 12).attr("font-size", 11.5).attr("fill", "var(--text-secondary)").text(nTxt + mTxt + (has ? ` · IQR ${fd(q1)}–${fd(q3)}` : ""));
-        if (readm) g.append("text").attr("x", 0).attr("y", cy + 26).attr("font-size", 11).attr("fill", "var(--text-muted)").text(readm.slice(3));
       }
       // Draw a fixed random sample of dots so very large groups stay responsive.
       let dots = gp.sp;
@@ -659,16 +602,15 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     });
   }
 
-  /* Admission is known to the month only, so discharge month is estimated as admission month + stay. */
-  const monthFmt = d3.utcFormat("%b %Y");
-  const admDate = (s: S) => (s.adm ? new Date(Date.UTC(+s.adm.slice(0, 4), +s.adm.slice(5, 7) - 1, 1)) : null);
-  const disTime = (s: S) => { const a = admDate(s); return a && !s.open ? a.getTime() + s.los * 864e5 : NaN; };
+  const dayFmt = d3.utcFormat("%-d %b %Y");
+  const isoDay = d3.utcFormat("%Y-%m-%d");
+  const dateCell = (t: number) => (isFinite(t) ? dayFmt(new Date(t)) : "–");
   const sortHead = (label: string, key: string, cur: { sort: string; dir: number }, attr: string, cls = "") =>
     `<th class="sortable${cls ? " " + cls : ""}${cur.sort === key ? " sorted" : ""}" ${attr}="${key}" title="Sort by ${esc(label.toLowerCase())}">${label}<span class="sdir">${cur.sort === key ? (cur.dir < 0 ? "▼" : "▲") : "↕"}</span></th>`;
 
   function spellDetail(r: PRow, from: string, to: string): string {
     const val: Record<string, (s: S) => number | string> = {
-      id: (s) => s.id, adm: (s) => s.adm || "", dis: (s) => (s.open ? Infinity : disTime(s) || 0), los: (s) => s.los, status: (s) => (s.open ? 1 : 0),
+      id: (s) => s.id, adm: (s) => s.admAt || 0, dis: (s) => (s.open ? Infinity : s.disAt || 0), los: (s) => s.los, status: (s) => (s.open ? 1 : 0),
     };
     const f = val[ps.sort] ?? val.los;
     const sp = r.sp.slice().sort((a, b) => {
@@ -678,16 +620,14 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     const shown = sp.slice(0, SPELL_CAP);
     const maxLos = d3.max(r.sp, (s) => s.los) || 1;
     const h = (label: string, key: string, cls = "") => sortHead(label, key, ps, "data-psort", cls);
-    return `<div class="spells"><table><thead><tr>${h("Spell", "id")}${h("Admitted", "adm")}${h("Discharged (approx.)", "dis")}${h("Status", "status")}${h("Stay (d)", "los", "n")}<th class="tl">Ward by ward (bar length = days; hover for detail)</th></tr></thead><tbody>` +
+    return `<div class="spells"><table><thead><tr>${h("Spell", "id")}${h("Admitted", "adm")}${h("Discharged", "dis")}${h("Status", "status")}${h("Stay (d)", "los", "n")}<th class="tl">Ward by ward (bar length = days; hover for detail)</th></tr></thead><tbody>` +
       shown.map((s) => {
-        const a = admDate(s), d = disTime(s);
-        return `<tr><td>${esc(s.id)}</td><td>${a ? monthFmt(a) : "–"}</td><td>${s.open ? '<span class="note">still in hospital</span>' : isFinite(d) ? "≈ " + monthFmt(new Date(d)) : "–"}</td><td>${s.open ? "In hospital" : "Discharged"}</td><td class="n">${fd(s.los)}</td><td class="tl"><div class="tlbar" style="width:${Math.max(2, (s.los / maxLos) * 100)}%">` +
+        return `<tr><td>${esc(s.id)}</td><td>${dateCell(s.admAt)}</td><td>${s.open ? '<span class="note">still in hospital</span>' : dateCell(s.disAt)}</td><td>${s.open ? "In hospital" : "Discharged"}</td><td class="n">${fd(s.los)}</td><td class="tl"><div class="tlbar" style="width:${Math.max(2, (s.los / maxLos) * 100)}%">` +
           s.seq.map((x) => `<span style="flex:${Math.max(x.days, 0.01)};background:${wardColor(x.ward, from, to)}" title="${esc(x.ward)}: ${fd(x.days)} days"></span>`).join("") +
           `</div></td></tr>`;
       }).join("") +
       (sp.length > SPELL_CAP ? `<tr><td colspan="6" class="note">Showing the first ${SPELL_CAP} of ${fmt(sp.length)} spells in this order.</td></tr>` : "") +
-      `</tbody></table><div class="legend">${r.path.filter((w, i, a) => a.indexOf(w) === i).map((w) => `<span><i style="background:${wardColor(w, from, to)};height:10px"></i>${esc(w)}</span>`).join("")}</div>
-      <p class="note">Admission is recorded by month only, so the discharge month is estimated (admission month + length of stay) and may be out by up to a month.</p></div>`;
+      `</tbody></table><div class="legend">${r.path.filter((w, i, a) => a.indexOf(w) === i).map((w) => `<span><i style="background:${wardColor(w, from, to)};height:10px"></i>${esc(w)}</span>`).join("")}</div></div>`;
   }
 
   /** Pathway with days on each ward, e.g. "Adult rehab 28 d → Adult acute 12 d → Still in hospital". */
@@ -785,7 +725,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     if (dd.via) sp = sp.filter((s) => s.path.includes(dd.via));
     const adj = st.exclMode === "days" && st.excl.size > 0;
     const val: Record<string, (s: S) => number | string> = {
-      id: (s) => s.id, adm: (s) => s.adm || "", dis: (s) => disTime(s) || 0, los: (s) => adjLos(s), total: (s) => s.los,
+      id: (s) => s.id, adm: (s) => s.admAt || 0, dis: (s) => s.disAt || 0, los: (s) => adjLos(s), total: (s) => s.los,
       via: (s) => d3.sum(s.seq, (x) => (x.ward === dd.via ? x.days : 0)), moves: (s) => s.path.length,
     };
     const f = val[dd.sort] ?? val.los;
@@ -803,11 +743,10 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
       <div class="cardhead"><div><h3>${esc(title)}</h3>
         <div class="note">${fmt(ddRows.length)} spells · average stay ${fd(avg)} days${adj ? ` (excluding ${esc([...st.excl].join(", "))})` : ""}. Click a heading to sort.</div></div>
         <div class="drill-actions"><button type="button" data-dcsv="1">Download CSV</button><button type="button" data-dclose="1">✕ Close</button></div></div>
-      <div style="overflow-x:auto"><table class="drilltable"><thead><tr>${h("Spell", "id")}${h("Admitted", "adm")}${h("Discharged (approx.)", "dis")}${h(adj ? "Stay excl. (d)" : "Stay (d)", "los", "n")}${adj ? h("Total stay (d)", "total", "n") : ""}${dd.via ? h(`Days on ${dd.via}`, "via", "n") : ""}${h("Pathway (days on each ward)", "moves")}</tr></thead><tbody>` +
+      <div style="overflow-x:auto"><table class="drilltable"><thead><tr>${h("Spell", "id")}${h("Admitted", "adm")}${h("Discharged", "dis")}${h(adj ? "Stay excl. (d)" : "Stay (d)", "los", "n")}${adj ? h("Total stay (d)", "total", "n") : ""}${dd.via ? h(`Days on ${dd.via}`, "via", "n") : ""}${h("Pathway (days on each ward)", "moves")}</tr></thead><tbody>` +
       slice.map((s) => {
-        const a = admDate(s), d = disTime(s);
         const via = d3.sum(s.seq, (x) => (x.ward === dd.via ? x.days : 0));
-        return `<tr><td>${esc(s.id)}</td><td>${a ? monthFmt(a) : "–"}</td><td>${isFinite(d) ? "≈ " + monthFmt(new Date(d)) : "–"}</td><td class="n">${fd(adjLos(s))}</td>${adj ? `<td class="n">${fd(s.los)}</td>` : ""}${dd.via ? `<td class="n">${fd(via)}</td>` : ""}<td class="path"><div class="pathwrap">${pathDaysHtml(s, st.from, st.to)}</div></td></tr>`;
+        return `<tr><td>${esc(s.id)}</td><td>${dateCell(s.admAt)}</td><td>${dateCell(s.disAt)}</td><td class="n">${fd(adjLos(s))}</td>${adj ? `<td class="n">${fd(s.los)}</td>` : ""}${dd.via ? `<td class="n">${fd(via)}</td>` : ""}<td class="path"><div class="pathwrap">${pathDaysHtml(s, st.from, st.to)}</div></td></tr>`;
       }).join("") + `</tbody></table></div>` +
       (pages > 1 ? `<div class="pager"><button type="button" data-dpage="${dd.page - 1}"${dd.page === 0 ? " disabled" : ""}>‹ Previous</button><span class="note">Page ${dd.page + 1} of ${fmt(pages)}</span><button type="button" data-dpage="${dd.page + 1}"${dd.page >= pages - 1 ? " disabled" : ""}>Next ›</button></div>` : "") +
       `</div>`;
@@ -909,10 +848,9 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     if (t.closest("[data-dclose]")) { dd.ward = dd.via = ""; dischargeChart(lastSp); return; }
     if (t.closest("[data-dcsv]")) {
       const cell = (v: unknown) => { const x = String(v ?? ""); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
-      const lines = [["spell", "admitted_month", "discharged_month_approx", "stay_days", "total_stay_days", "pathway"].join(",")].concat(
+      const lines = [["spell", "admitted", "discharged", "stay_days", "total_stay_days", "pathway"].join(",")].concat(
         ddRows.map((s) => {
-          const a = admDate(s), d = disTime(s);
-          return [s.id, a ? d3.utcFormat("%Y-%m")(a) : "", isFinite(d) ? d3.utcFormat("%Y-%m")(new Date(d)) : "", Math.round(adjLos(s)), Math.round(s.los),
+          return [s.id, isFinite(s.admAt) ? isoDay(new Date(s.admAt)) : "", isFinite(s.disAt) ? isoDay(new Date(s.disAt)) : "", Math.round(adjLos(s)), Math.round(s.los),
             s.seq.map((x) => `${x.ward} (${Math.round(x.days)}d)`).join(" > ")].map(cell).join(",");
         }));
       const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
@@ -948,12 +886,7 @@ export function mountExplorer(root: HTMLElement, data: WardData, onReload: () =>
     $("#lgHl").textContent = `${from} → ${to}`;
     $("#lgFrom").textContent = from;
     $("#lgTo").textContent = to;
-    let sp = ALL.filter((s) =>
-      (!st.year || s.year >= st.year) && (!st.age || s.age === st.age) && (!st.legal || s.legal === st.legal) &&
-      (!st.dx || s.dx === st.dx) && (!st.borough || s.borough === st.borough));
-    const nCm = [st.year, st.age, st.legal, st.dx, st.borough].filter(Boolean).length;
-    $("#cmCount").textContent = nCm ? `· ${nCm} active` : "";
-    if (nCm) ($("#caseMix") as HTMLDetailsElement).open = true;
+    let sp = ALL;
     if (st.onlyFrom) sp = sp.filter((s) => s.path.includes(from));
     if (st.status === "disc") sp = sp.filter((s) => !s.open);
     if (st.status === "open") sp = sp.filter((s) => s.open);
